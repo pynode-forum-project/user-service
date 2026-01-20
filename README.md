@@ -38,10 +38,10 @@ user-service/
 | firstName       | VARCHAR(50)  | NOT NULL                       | User's first name               |
 | lastName        | VARCHAR(50)  | NOT NULL                       | User's last name                |
 | email           | VARCHAR(100) | UNIQUE, NOT NULL               | User's email address            |
-| isActive        | BOOLEAN      | DEFAULT FALSE                  | Account status (active/banned)  |
+| isActive        | BOOLEAN      | DEFAULT TRUE                   | Account status (true=active, false=banned) |
 | password        | VARCHAR(255) | NOT NULL                       | Hashed password                 |
 | dateJoined      | DATETIME     | NOT NULL, DEFAULT CURRENT_TIME | Registration timestamp          |
-| userType        | VARCHAR(50)  | NOT NULL, DEFAULT 'normal_user'| User role/type                  |
+| userType        | VARCHAR(50)  | NOT NULL, DEFAULT 'unverified' | User role/type                  |
 | profileImageURL | VARCHAR(255) | NULLABLE                       | Profile image URL (S3)          |
 
 > **Note**: Field naming conventions:
@@ -96,7 +96,7 @@ user-service/
    python run.py
    ```
 
-5. **Verify**: The service should start at `http://localhost:5000`
+5. **Verify**: The service should start at `http://localhost:5001`
 
 ### Docker Development
 
@@ -112,25 +112,42 @@ docker-compose up -d mysql user-service
 | DATABASE_URI  | mysql+pymysql://root:root@localhost:3306/forum_user_db | Database connection  |
 | JWT_SECRET    | your-secret-key                                        | JWT signing secret   |
 
-## TODO: API Endpoints
+## API Endpoints
 
-### External APIs (via Gateway, requires JWT)
+### Internal APIs (for Auth Service) ✅ Implemented
 
-| Method | Endpoint                | Description           |
-|--------|-------------------------|-----------------------|
-| GET    | /api/users/{id}/profile | Get user profile      |
-| PUT    | /api/users/{id}/profile | Update user profile   |
-| GET    | /api/users              | List all users (Admin)|
-| PUT    | /api/users/{id}/status  | Ban/Unban user (Admin)|
+| Method | Endpoint                     | Description              | Status |
+|--------|------------------------------|--------------------------|--------|
+| POST   | /internal/users              | Create user (register)   | ✅ Done |
+| GET    | /internal/users/{id}         | Get user by ID           | ✅ Done |
+| GET    | /internal/users/email?email= | Get user by email (login)| ✅ Done |
+| PUT    | /internal/users/{id}/verify  | Verify user email        | ✅ Done |
 
-### Internal APIs (for Auth Service)
+#### Example: Create User
+```bash
+curl -X POST http://localhost:5001/internal/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john@example.com",
+    "password": "password123"
+  }'
+```
 
-| Method | Endpoint                    | Description              |
-|--------|-----------------------------|--------------------------|
-| POST   | /internal/users             | Create user (register)   |
-| GET    | /internal/users/{id}        | Get user by ID           |
-| GET    | /internal/users/email/{email}| Get user by email (login)|
-| PUT    | /internal/users/{id}/verify | Verify user email        |
+#### Example: Get User by Email
+```bash
+curl "http://localhost:5001/internal/users/email?email=john@example.com"
+```
+
+### External APIs (via Gateway, requires JWT) 🚧 TODO
+
+| Method | Endpoint                | Description           | Status |
+|--------|-------------------------|-----------------------|--------|
+| GET    | /api/users/{id}/profile | Get user profile      | 🚧 TODO |
+| PUT    | /api/users/{id}/profile | Update user profile   | 🚧 TODO |
+| GET    | /api/users              | List all users (Admin)| 🚧 TODO |
+| PUT    | /api/users/{id}/status  | Ban/Unban user (Admin)| 🚧 TODO |
 
 ## License
 
