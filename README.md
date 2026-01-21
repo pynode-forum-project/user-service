@@ -14,7 +14,7 @@ User Service is a Flask-based microservice that manages user-related operations 
 ```
 user-service/
 ├── app/
-│   ├── __init__.py              # Flask application factory
+│   ├── __init__.py              # Flask application factory (with auto-seed)
 │   ├── config.py                # Configuration (database, JWT, etc.)
 │   ├── models/
 │   │   ├── __init__.py          # SQLAlchemy db instance
@@ -23,6 +23,7 @@ user-service/
 │       ├── user_routes.py       # External APIs (via Gateway)
 │       └── internal_routes.py   # Internal APIs (for Auth Service)
 ├── run.py                       # Application entry point
+├── seed.py                      # Manual database seeding script
 ├── requirements.txt             # Python dependencies
 ├── Dockerfile                   # Docker build file
 └── README.md
@@ -95,6 +96,7 @@ user-service/
    ```bash
    python run.py
    ```
+   > **Note**: On first run, the database will be **automatically seeded** with test users if empty.
 
 5. **Verify**: The service should start at `http://localhost:5001`
 
@@ -111,6 +113,45 @@ docker-compose up -d mysql user-service
 |---------------|--------------------------------------------------------|----------------------|
 | DATABASE_URI  | mysql+pymysql://root:root@localhost:3306/forum_user_db | Database connection  |
 | JWT_SECRET    | your-secret-key                                        | JWT signing secret   |
+| AUTO_SEED     | true                                                   | Auto-seed on startup |
+
+## Database Seeding
+
+### Auto-Seed (Default)
+
+When the application starts and the database is **empty**, it automatically seeds the following test users:
+
+| Email                    | Password         | userType    |
+|--------------------------|------------------|-------------|
+| superadmin@forum.com     | SuperAdmin123!   | superadmin  |
+| admin@forum.com          | AdminUser123!    | admin       |
+| john.doe@example.com     | Password123!     | normal_user |
+| jane.smith@example.com   | Password123!     | normal_user |
+
+To disable auto-seed (e.g., in production):
+```bash
+AUTO_SEED=false python run.py
+```
+
+### Manual Seed
+
+For more test users (including banned user), run manually:
+
+```bash
+# Add all seed users
+python seed.py
+
+# Clear all users and re-seed
+python seed.py --clear
+python seed.py
+```
+
+Additional users from manual seed:
+
+| Email                    | Password         | userType    | isActive |
+|--------------------------|------------------|-------------|----------|
+| bob.wilson@example.com   | Password123!     | unverified  | true     |
+| banned@example.com       | Password123!     | normal_user | **false** |
 
 ## API Endpoints
 
