@@ -114,14 +114,15 @@ docker-compose up -d mysql user-service
 
 ## API Endpoints
 
-### Internal APIs (for Auth Service) ✅ Implemented
+### Internal APIs (for Auth Service) Implemented
 
-| Method | Endpoint                     | Description              | Status |
-|--------|------------------------------|--------------------------|--------|
-| POST   | /internal/users              | Create user (register)   | ✅ Done |
-| GET    | /internal/users/{id}         | Get user by ID           | ✅ Done |
-| GET    | /internal/users/email?email= | Get user by email (login)| ✅ Done |
-| PUT    | /internal/users/{id}/verify  | Verify user email        | ✅ Done |
+| Method | Endpoint                    | Description               | Status |
+|--------|-----------------------------|---------------------------|--------|
+| POST   | /internal/users             | Create user (register)    | Done |
+| GET    | /internal/users/{id}        | Get user by ID            | Done |
+| GET    | /internal/users/email?email=| Get user by email         | Done |
+| PUT    | /internal/users/{id}/verify | Verify user email         | Done |
+| POST   | /internal/users/verify      | Verify credentials (login)| Done |
 
 #### Example: Create User
 ```bash
@@ -135,19 +136,108 @@ curl -X POST http://localhost:5001/internal/users \
   }'
 ```
 
-#### Example: Get User by Email
-```bash
-curl "http://localhost:5001/internal/users/email?email=john@example.com"
+**Response (201 Created):**
+```json
+{
+  "userId": "uuid-string",
+  "firstName": "John",
+  "lastName": "Doe",
+  "email": "john@example.com"
+}
 ```
 
-### External APIs (via Gateway, requires JWT) 🚧 TODO
+**Response (409 Conflict):**
+```json
+{
+  "error": "User with this email already exists"
+}
+```
 
-| Method | Endpoint                | Description           | Status |
-|--------|-------------------------|-----------------------|--------|
-| GET    | /api/users/{id}/profile | Get user profile      | 🚧 TODO |
-| PUT    | /api/users/{id}/profile | Update user profile   | 🚧 TODO |
-| GET    | /api/users              | List all users (Admin)| 🚧 TODO |
-| PUT    | /api/users/{id}/status  | Ban/Unban user (Admin)| 🚧 TODO |
+#### Example: Verify Credentials (for Auth Service login)
+```bash
+curl -X POST http://localhost:5001/internal/users/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john@example.com",
+    "password": "password123"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "userId": "uuid-string",
+  "userType": "normal_user",
+  "isActive": true
+}
+```
+
+**Response (401 Unauthorized):**
+```json
+{
+  "error": "Invalid email or password"
+}
+```
+
+**Response (404 Not Found):**
+```json
+{
+  "error": "User not found"
+}
+```
+
+### External APIs (via Gateway, requires JWT) Implemented
+
+| Method | Endpoint                | Description              | Auth Required |
+|--------|-------------------------|--------------------------|---------------|
+| GET    | /api/users/me           | Get current user profile | JWT        |
+| GET    | /api/users/{id}/profile | Get user profile by ID   | JWT        |
+| PUT    | /api/users/{id}/profile | Update own profile       | JWT (self) |
+| GET    | /api/users              | List all users           | Admin only |
+| PUT    | /api/users/{id}/status  | Ban/Unban user           | Admin only |
+
+#### Example: Get Current User (restore login state)
+```bash
+curl http://localhost:8080/api/users/me \
+  -H "Authorization: Bearer <JWT_TOKEN>"
+```
+
+#### Example: Update Profile
+```bash
+curl -X PUT http://localhost:8080/api/users/{user_id}/profile \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstName": "John",
+    "lastName": "Smith",
+    "profileImageURL": "https://example.com/avatar.jpg"
+  }'
+```
+
+#### Example: List All Users (Admin)
+```bash
+curl "http://localhost:8080/api/users?page=1&per_page=20" \
+  -H "Authorization: Bearer <ADMIN_JWT_TOKEN>"
+```
+
+#### Example: Ban User (Admin)
+```bash
+curl -X PUT http://localhost:8080/api/users/{user_id}/status \
+  -H "Authorization: Bearer <ADMIN_JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"isActive": false}'
+```
+
+## JWT Token Structure
+
+External APIs expect JWT tokens with the following claims:
+- `sub` (identity): User ID
+- `userType`: User role (`unverified`, `normal_user`, `admin`, `superadmin`)
+
+**Note**: JWT tokens are issued by Auth Service. All external requests must include:
+```
+Authorization: Bearer <token>
+```
 
 ## License
 
