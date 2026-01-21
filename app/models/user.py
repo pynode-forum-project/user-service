@@ -13,10 +13,10 @@ class User(db.Model):
     firstName = db.Column(db.String(50), nullable=False)
     lastName = db.Column(db.String(50), nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
-    isActive = db.Column(db.Boolean, default=False)
+    isActive = db.Column(db.Boolean, default=True)  # True=active, False=banned
     password = db.Column(db.String(255), nullable=False)
     dateJoined = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    userType = db.Column(db.String(50), nullable=False, default='normal_user')
+    userType = db.Column(db.String(50), nullable=False, default='unverified')  # unverified until email verified
     profileImageURL = db.Column(db.String(255), nullable=True)
 
     def __repr__(self):
@@ -34,8 +34,8 @@ class User(db.Model):
             'firstName': self.firstName,
             'lastName': self.lastName,
             'email': self.email,
-            'isActive': self.isActive,
+            'active': self.isActive,
             'dateJoined': self.dateJoined.isoformat() if self.dateJoined else None,
-            'userType': self.userType,
+            'type': self.userType,
             'profileImageURL': self.profileImageURL
         }
