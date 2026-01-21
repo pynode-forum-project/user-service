@@ -34,8 +34,8 @@ class User(db.Model):
             'firstName': self.firstName,
             'lastName': self.lastName,
             'email': self.email,
-            'isActive': self.isActive,
+            'active': self.isActive,
             'dateJoined': self.dateJoined.isoformat() if self.dateJoined else None,
-            'userType': self.userType,
+            'type': self.userType,
             'profileImageURL': self.profileImageURL
         }
