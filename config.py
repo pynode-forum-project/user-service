@@ -14,4 +14,7 @@ class Config:
 
     JWT_SECRET_KEY = os.getenv('JWT_SECRET', 'your-secret-key')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=3)
+    
+    JWT_IDENTITY_CLAIM = 'user_id'
+    JWT_ALGORITHM = 'HS256'
 
