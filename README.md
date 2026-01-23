@@ -229,13 +229,17 @@ curl -X POST http://localhost:5001/internal/users/verify \
 
 ### External APIs (via Gateway, requires JWT) Implemented
 
-| Method | Endpoint                | Description              | Auth Required |
-|--------|-------------------------|--------------------------|---------------|
-| GET    | /api/users/me           | Get current user profile | JWT        |
-| GET    | /api/users/{id}/profile | Get user profile by ID   | JWT        |
-| PUT    | /api/users/{id}/profile | Update own profile       | JWT (self) |
-| GET    | /api/users              | List all users           | Admin only |
-| PUT    | /api/users/{id}/status  | Ban/Unban user           | Admin only |
+| Method | Endpoint                          | Description                    | Auth Required |
+|--------|-----------------------------------|--------------------------------|---------------|
+| GET    | /api/users/me                     | Get current user profile       | JWT           |
+| PUT    | /api/users/me                     | Update current user profile    | JWT           |
+| PUT    | /api/users/me/profile-image        | Update profile image            | JWT           |
+| POST   | /api/users/me/email/request-update| Request email update            | JWT           |
+| POST   | /api/users/me/email/confirm-update | Confirm email update           | JWT           |
+| GET    | /api/users/{id}/profile           | Get user profile by ID          | JWT           |
+| PUT    | /api/users/{id}/profile           | Update own profile             | JWT (self)    |
+| GET    | /api/users                        | List all users                 | Admin only    |
+| PUT    | /api/users/{id}/status            | Ban/Unban user                 | Admin only    |
 
 #### Example: Get Current User (restore login state)
 ```bash
@@ -243,7 +247,116 @@ curl http://localhost:8080/api/users/me \
   -H "Authorization: Bearer <JWT_TOKEN>"
 ```
 
-#### Example: Update Profile
+#### Example: Update Current User Profile
+```bash
+curl -X PUT http://localhost:8080/api/users/me \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstName": "John",
+    "lastName": "Smith"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Profile updated successfully",
+  "user": {
+    "userId": "uuid-string",
+    "firstName": "John",
+    "lastName": "Smith",
+    ...
+  }
+}
+```
+
+#### Example: Update Profile Image
+```bash
+curl -X PUT http://localhost:8080/api/users/me/profile-image \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profileImageURL": "https://s3.amazonaws.com/bucket/avatar.jpg"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Profile image updated successfully",
+  "user": {
+    "userId": "uuid-string",
+    "profileImageURL": "https://s3.amazonaws.com/bucket/avatar.jpg",
+    ...
+  }
+}
+```
+
+#### Example: Request Email Update
+```bash
+curl -X POST http://localhost:8080/api/users/me/email/request-update \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "newEmail": "newemail@example.com"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Verification code sent to new email address"
+}
+```
+
+**Response (409 Conflict):**
+```json
+{
+  "message": "Validation failed",
+  "details": {
+    "newEmail": "Email already in use"
+  }
+}
+```
+
+#### Example: Confirm Email Update
+```bash
+curl -X POST http://localhost:8080/api/users/me/email/confirm-update \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "newEmail": "newemail@example.com",
+    "verificationCode": "123456"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Email updated successfully. Please verify your new email address.",
+  "user": {
+    "userId": "uuid-string",
+    "email": "newemail@example.com",
+    "userType": "unverified",
+    ...
+  }
+}
+```
+
+**Response (400 Bad Request):**
+```json
+{
+  "message": "Verification failed",
+  "details": {
+    "verificationCode": "Invalid verification code"
+  }
+}
+```
+
+> **Note**: After email update, `userType` is reset to `unverified` and user must verify the new email address.
+
+#### Example: Update Profile (Legacy endpoint)
 ```bash
 curl -X PUT http://localhost:8080/api/users/{user_id}/profile \
   -H "Authorization: Bearer <JWT_TOKEN>" \
