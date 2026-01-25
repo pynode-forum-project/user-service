@@ -1,149 +1,112 @@
-# internal_routes.py
-# Internal routes for the user service (called by Auth Service)
+from flask import request, jsonify
+from datetime import datetime
+from app.routes import internal_bp
+from app.services.user_service import UserService
+from app.utils.decorators import handle_exceptions
 
-from flask import Blueprint, request, jsonify, current_app
-from email_validator import validate_email, EmailNotValidError
-from app.models import db
-from app.models.user import User
-
-internal_bp = Blueprint('internal', __name__, url_prefix='/internal/users')
+user_service = UserService()
 
 
-@internal_bp.route('', methods=['POST'])
+@internal_bp.route('/users', methods=['POST'])
+@handle_exceptions
 def create_user():
-    """Create a new user (called by Auth Service during registration)"""
+    """Create a new user (Internal API for Auth Service)"""
     data = request.get_json()
     
-    if not data:
-        return jsonify({'error': 'Request body is required'}), 400
-    
-    # Collect all validation errors
-    errors = {}
-    
-    # Check required fields
-    required_fields = ['firstName', 'lastName', 'email', 'password']
-    for field in required_fields:
-        if not data.get(field):
-            errors[field] = f'{field} is required'
-    
-    # Validate field lengths (only if field exists)
-    if data.get('firstName') and len(data['firstName']) > 50:
-        errors['firstName'] = 'Must be at most 50 characters'
-    if data.get('lastName') and len(data['lastName']) > 50:
-        errors['lastName'] = 'Must be at most 50 characters'
-    if data.get('password') and len(data['password']) < 8:
-        errors['password'] = 'Must be at least 8 characters'
-    
-    # Validate email format
-    if data.get('email'):
-        try:
-            validate_email(data['email'], check_deliverability=not current_app.debug)
-        except EmailNotValidError:
-            errors['email'] = 'Invalid email format'
-    
-    # Return all validation errors at once
-    if errors:
-        return jsonify({
-            'error': 'Validation failed',
-            'details': errors
-        }), 400
-    
-    # Check if email already exists
-    existing_user = User.query.filter_by(email=data['email']).first()
-    if existing_user:
-        return jsonify({'error': 'User with this email already exists'}), 409
-    
-    # Create user
-    user = User(
-        firstName=data['firstName'],
-        lastName=data['lastName'],
-        email=data['email']
+    user = user_service.create_user(
+        first_name=data.get('firstName'),
+        last_name=data.get('lastName'),
+        email=data.get('email'),
+        password=data.get('password'),
+        verification_token=data.get('verificationToken'),
+        token_expires_at=data.get('tokenExpiresAt')
     )
     
-    # Hash the password
-    user.set_password(data['password'])
+    return jsonify(user.to_dict(include_password=False)), 201
+
+
+@internal_bp.route('/users/<int:user_id>', methods=['GET'])
+@handle_exceptions
+def get_user_internal(user_id):
+    """Get user by ID (Internal API)"""
+    user = user_service.get_user_by_id(user_id)
     
-    # Save to database
-    try:
-        db.session.add(user)
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to create user', 'details': str(e)}), 500
-    
-    # Return user info (without password)
-    return jsonify({
-        'userId': user.userId,
-        'firstName': user.firstName,
-        'lastName': user.lastName,
-        'email': user.email
-    }), 201
-
-
-@internal_bp.route('/<string:user_id>', methods=['GET'])
-def get_user(user_id):
-    """Get a user by ID"""
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    return jsonify(user.to_dict()), 200
-
-
-@internal_bp.route('/email', methods=['GET'])
-def get_user_by_email():
-    """Get a user by email"""
-    email = request.args.get('email')
-    if not email:
-        return jsonify({'error': 'Email query parameter is required'}), 400
-    user = User.query.filter_by(email=email).first()
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    return jsonify(user.to_dict()), 200
-
-
-@internal_bp.route('/<string:user_id>/verify', methods=['PUT'])
-def verify_user(user_id):
-    """Verify a user's email (change userType to normal_user)"""
-    user = User.query.get(user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
     
-    user.userType = 'normal_user'
-    try:
-        db.session.commit()
-        return jsonify({'message': 'User verified successfully', 'user': user.to_dict()}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to verify user', 'details': str(e)}), 500
+    return jsonify(user.to_dict(include_password=True)), 200
 
 
-@internal_bp.route('/verify', methods=['POST'])
-def verify_credentials():
-    """Verify user credentials (called by Auth Service during login)"""
+@internal_bp.route('/users/email/<email>', methods=['GET'])
+@handle_exceptions
+def get_user_by_email(email):
+    """Get user by email (Internal API for Auth Service)"""
+    user = user_service.get_user_by_email(email)
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify(user.to_dict(include_password=True)), 200
+
+
+@internal_bp.route('/users/verify-email', methods=['POST'])
+@handle_exceptions
+def verify_email():
+    """Verify user email with token (Internal API)"""
     data = request.get_json()
-    
-    if not data:
-        return jsonify({'error': 'Request body is required'}), 400
-    
     email = data.get('email')
-    password = data.get('password')
+    token = data.get('token')
     
-    # Validate required fields
-    if not email or not password:
-        return jsonify({'error': 'Email and password are required'}), 400
+    user = user_service.get_user_by_email(email)
     
-    # Find user by email
-    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'success': False, 'message': 'User not found'}), 404
+    
+    if user.email_verified:
+        return jsonify({'success': True, 'message': 'Email already verified', 'user': user.to_public_dict()}), 200
+    
+    if user.verification_token != token:
+        return jsonify({'success': False, 'message': 'Invalid verification token'}), 400
+    
+    if user.token_expires_at and user.token_expires_at < datetime.utcnow():
+        return jsonify({'success': False, 'message': 'Verification token has expired'}), 400
+    
+    # Verify the email
+    updated_user = user_service.verify_email(user.user_id)
+    
+    return jsonify({
+        'success': True,
+        'message': 'Email verified successfully',
+        'user': updated_user.to_public_dict()
+    }), 200
+
+
+@internal_bp.route('/users/<int:user_id>/verification-token', methods=['PUT'])
+@handle_exceptions
+def update_verification_token(user_id):
+    """Update user's verification token (Internal API)"""
+    data = request.get_json()
+    token = data.get('token')
+    expires_at = data.get('expiresAt')
+    
+    user = user_service.update_verification_token(user_id, token, expires_at)
+    
     if not user:
         return jsonify({'error': 'User not found'}), 404
     
-    # Verify password
-    if not user.check_password(password):
-        return jsonify({'error': 'Invalid email or password'}), 401
+    return jsonify({'message': 'Verification token updated'}), 200
+
+
+@internal_bp.route('/users/<int:user_id>/verification-token/valid', methods=['GET'])
+@handle_exceptions
+def get_valid_verification_token(user_id):
+    """Get valid verification token if exists and not expired (Internal API)"""
+    token, expires_at = user_service.get_valid_verification_token(user_id)
     
-    # Return user info for Auth Service to generate JWT
-    return jsonify({
-        'userId': user.userId,
-        'userType': user.userType,
-        'isActive': user.isActive
-    }), 200
+    if token:
+        return jsonify({
+            'token': token,
+            'expiresAt': expires_at.isoformat() if expires_at else None
+        }), 200
+    else:
+        return jsonify({'token': None, 'expiresAt': None}), 200
