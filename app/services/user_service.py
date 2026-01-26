@@ -20,6 +20,10 @@ class UserService:
     def get_user_by_email(self, email: str) -> User:
         """Get user by email"""
         return User.query.filter_by(email=email).first()
+
+    def get_user_by_pending_email(self, email: str) -> User:
+        """Get user by pending email"""
+        return User.query.filter_by(pending_email=email).first()
     
     def create_user(self, first_name: str, last_name: str, email: str, 
                     password: str, verification_token: str = None,
@@ -62,16 +66,22 @@ class UserService:
             existing_user = self.get_user_by_email(new_email)
             if existing_user and existing_user.user_id != user_id:
                 raise ValueError('Email already in use')
+            pending_user = self.get_user_by_pending_email(new_email)
+            if pending_user and pending_user.user_id != user_id:
+                raise ValueError('Email already in use')
             
             # If email is actually changing
             if user.email != new_email:
                 email_changed = True
-                user.email = new_email
+                user.pending_email = new_email
                 # Set user to unverified and email_verified to False
                 # Only if user is not admin or super_admin
                 if user.type not in ['admin', 'super_admin']:
                     user.type = 'unverified'
                 user.email_verified = False
+                # Clear any existing verification token so a new one is issued
+                user.verification_token = None
+                user.token_expires_at = None
         
         db.session.commit()
         
@@ -89,13 +99,16 @@ class UserService:
         
         return user
     
-    def verify_email(self, user_id: int) -> User:
+    def verify_email(self, user_id: int, verified_email: str = None) -> User:
         """Verify user email"""
         user = self.get_user_by_id(user_id)
         
         if not user:
             return None
         
+        if user.pending_email and verified_email == user.pending_email:
+            user.email = user.pending_email
+            user.pending_email = None
         user.email_verified = True
         # Only set type to 'normal' if user is currently 'unverified'
         # Preserve admin and super_admin types

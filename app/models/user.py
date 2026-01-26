@@ -11,6 +11,7 @@ class User(db.Model):
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50), nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    pending_email = db.Column(db.String(100), nullable=True)
     password = db.Column(db.String(255), nullable=False)
     active = db.Column(db.Boolean, default=True)
     email_verified = db.Column(db.Boolean, default=False)
@@ -33,6 +34,7 @@ class User(db.Model):
             'first_name': self.first_name,
             'last_name': self.last_name,
             'email': self.email,
+            'pending_email': self.pending_email,
             'active': self.active,
             'email_verified': self.email_verified,
             'date_joined': self.date_joined.isoformat() if self.date_joined else None,
@@ -52,6 +54,7 @@ class User(db.Model):
             'firstName': self.first_name,
             'lastName': self.last_name,
             'email': self.email,
+            'pendingEmail': self.pending_email,
             'active': self.active,
             'emailVerified': self.email_verified,
             'dateJoined': self.date_joined.isoformat() if self.date_joined else None,

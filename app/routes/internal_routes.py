@@ -49,6 +49,18 @@ def get_user_by_email(email):
     return jsonify(user.to_dict(include_password=True)), 200
 
 
+@internal_bp.route('/users/pending-email/<email>', methods=['GET'])
+@handle_exceptions
+def get_user_by_pending_email(email):
+    """Get user by pending email (Internal API for Auth Service)"""
+    user = user_service.get_user_by_pending_email(email)
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify(user.to_dict(include_password=True)), 200
+
+
 @internal_bp.route('/users/verify-email', methods=['POST'])
 @handle_exceptions
 def verify_email():
@@ -59,10 +71,16 @@ def verify_email():
     
     user = user_service.get_user_by_email(email)
     
+    if user and user.pending_email:
+        return jsonify({'success': False, 'message': 'Pending email verification required'}), 400
+    
+    if not user:
+        user = user_service.get_user_by_pending_email(email)
+    
     if not user:
         return jsonify({'success': False, 'message': 'User not found'}), 404
     
-    if user.email_verified:
+    if user.email_verified and not user.pending_email:
         return jsonify({'success': True, 'message': 'Email already verified', 'user': user.to_public_dict()}), 200
     
     if user.verification_token != token:
@@ -72,7 +90,7 @@ def verify_email():
         return jsonify({'success': False, 'message': 'Verification token has expired'}), 400
     
     # Verify the email
-    updated_user = user_service.verify_email(user.user_id)
+    updated_user = user_service.verify_email(user.user_id, email)
     
     return jsonify({
         'success': True,
