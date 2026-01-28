@@ -33,31 +33,33 @@ user-service/
 
 ### User Table
 
-| Column          | Type         | Constraints                    | Description                     |
-|-----------------|--------------|--------------------------------|---------------------------------|
-| userId          | VARCHAR(36)  | PRIMARY KEY                    | UUID, auto-generated            |
-| firstName       | VARCHAR(50)  | NOT NULL                       | User's first name               |
-| lastName        | VARCHAR(50)  | NOT NULL                       | User's last name                |
-| email           | VARCHAR(100) | UNIQUE, NOT NULL               | User's email address            |
-| isActive        | BOOLEAN      | DEFAULT TRUE                   | Account status (true=active, false=banned) |
-| password        | VARCHAR(255) | NOT NULL                       | Hashed password                 |
-| dateJoined      | DATETIME     | NOT NULL, DEFAULT CURRENT_TIME | Registration timestamp          |
-| userType        | VARCHAR(50)  | NOT NULL, DEFAULT 'unverified' | User role/type                  |
-| profileImageURL | VARCHAR(255) | NULLABLE                       | Profile image URL (S3)          |
+| Column (DB)        | Type         | Constraints                    | Description                     |
+|--------------------|--------------|--------------------------------|---------------------------------|
+| user_id            | INT          | PRIMARY KEY, AUTO_INCREMENT   | User ID                         |
+| first_name         | VARCHAR(50)  | NOT NULL                       | User's first name               |
+| last_name          | VARCHAR(50)  | NOT NULL                       | User's last name                |
+| email              | VARCHAR(100) | UNIQUE, NOT NULL               | User's email address            |
+| pending_email      | VARCHAR(100) | NULL                           | Pending email (after update, before verify) |
+| password            | VARCHAR(255) | NOT NULL                       | Hashed password (bcrypt)         |
+| active             | BOOLEAN      | DEFAULT TRUE                   | Account status (true=active, false=banned) |
+| email_verified     | BOOLEAN      | DEFAULT FALSE                  | Email verification status       |
+| verification_token | VARCHAR(255) | NULL                           | Token for email verify          |
+| token_expires_at   | DATETIME     | NULL                           | Token expiry                    |
+| date_joined        | DATETIME     | DEFAULT CURRENT_TIMESTAMP      | Registration timestamp          |
+| type               | ENUM         | DEFAULT 'unverified'            | User role (see below)           |
+| profile_image_url  | VARCHAR(500) | NULL                           | Profile image URL (S3)          |
 
-> **Note**: Field naming conventions:
-> - `isActive` corresponds to `active` in project documentation
-> - `userType` corresponds to `type` in project documentation
+API responses use camelCase (e.g. `userId`, `firstName`, `type`).
 
 ### User Types
 
-| Type            | Description                                      |
-|-----------------|--------------------------------------------------|
-| `visitor`       | Can only see login, register, and contact pages  |
-| `unverified`    | Email not verified, can only view posts          |
-| `normal_user`   | Verified user, can create and reply to posts     |
-| `admin`         | Administrator                                    |
-| `superadmin`    | Super administrator (only one, hardcoded)        |
+| Type           | Description                                      |
+|----------------|--------------------------------------------------|
+| `visitor`      | Can only see login, register, and contact pages  |
+| `unverified`   | Email not verified, can only view posts          |
+| `normal`       | Verified user, can create and reply to posts     |
+| `admin`        | Administrator                                    |
+| `super_admin`  | Super administrator (only one, hardcoded)        |
 
 ## Setup
 
@@ -109,11 +111,11 @@ docker-compose up -d mysql user-service
 
 ## Environment Variables
 
-| Variable      | Default Value                                          | Description          |
-|---------------|--------------------------------------------------------|----------------------|
-| DATABASE_URI  | mysql+pymysql://root:root@localhost:3306/forum_user_db | Database connection  |
-| JWT_SECRET    | your-secret-key                                        | JWT signing secret   |
-| AUTO_SEED     | true                                                   | Auto-seed on startup |
+| Variable     | Default / Example                                       | Description          |
+|--------------|---------------------------------------------------------|----------------------|
+| DATABASE_URL | mysql+pymysql://root:root@localhost:3306/user_db        | Database connection  |
+| JWT_SECRET   | your-secret-key                                         | JWT signing secret   |
+| AUTO_SEED    | true                                                    | Auto-seed on startup |
 
 ## Database Seeding
 
@@ -155,17 +157,19 @@ Additional users from manual seed:
 
 ## API Endpoints
 
-### Internal APIs (for Auth Service) Implemented
+### Internal APIs (for Auth Service)
 
-| Method | Endpoint                    | Description               | Status |
-|--------|-----------------------------|---------------------------|--------|
-| POST   | /internal/users             | Create user (register)    | Done |
-| GET    | /internal/users/{id}        | Get user by ID            | Done |
-| GET    | /internal/users/email?email=| Get user by email         | Done |
-| PUT    | /internal/users/{id}/verify | Verify user email         | Done |
-| POST   | /internal/users/verify      | Verify credentials (login)| Done |
+| Method | Endpoint                                | Description               |
+|--------|-----------------------------------------|---------------------------|
+| POST   | /internal/users                         | Create user (register)   |
+| GET    | /internal/users/{user_id}               | Get user by ID            |
+| GET    | /internal/users/email/{email}           | Get user by email         |
+| GET    | /internal/users/pending-email/{email}   | Get user by pending email |
+| POST   | /internal/users/verify-email            | Verify email with token (body: email, token) |
+| PUT    | /internal/users/{id}/verification-token | Update verification token |
+| GET    | /internal/users/{id}/verification-token/valid | Get valid token if exists |
 
-#### Example: Create User
+#### Example: Create User (internal, used by Auth Service)
 ```bash
 curl -X POST http://localhost:5001/internal/users \
   -H "Content-Type: application/json" \
@@ -173,199 +177,52 @@ curl -X POST http://localhost:5001/internal/users \
     "firstName": "John",
     "lastName": "Doe",
     "email": "john@example.com",
-    "password": "password123"
+    "password": "<hashed-password>",
+    "verificationToken": "123456",
+    "tokenExpiresAt": "2026-01-28T12:00:00"
   }'
 ```
 
-**Response (201 Created):**
-```json
-{
-  "userId": "uuid-string",
-  "firstName": "John",
-  "lastName": "Doe",
-  "email": "john@example.com"
-}
-```
+**Response (201 Created):** User object (snake_case; include_password=false).  
+**Response (409 Conflict):** `{ "error": "..." }` (e.g. email already exists).
 
-**Response (409 Conflict):**
-```json
-{
-  "error": "User with this email already exists"
-}
-```
+Login and password verification are handled by the **Auth Service**; User Service does not expose a "verify credentials" endpoint. Auth Service calls internal GET user by email and verifies password locally.
 
-#### Example: Verify Credentials (for Auth Service login)
+### External APIs (via Gateway at /api; require JWT unless noted)
+
+| Method | Endpoint                     | Description                    | Auth        |
+|--------|------------------------------|--------------------------------|-------------|
+| GET    | /api/users                   | List all users (paginated)     | Admin only  |
+| GET    | /api/users/:id               | Get user by ID                 | JWT         |
+| PUT    | /api/users/:id               | Update user (self or admin)    | JWT         |
+| PUT    | /api/users/:id/profile-image | Update profile image URL       | JWT (self)  |
+| PUT    | /api/users/:id/ban           | Ban user                       | Admin only  |
+| PUT    | /api/users/:id/unban         | Unban user                     | Admin only  |
+| PUT    | /api/users/:id/promote      | Promote to admin               | Super Admin |
+| PUT    | /api/users/:id/demote       | Demote admin to user           | Super Admin |
+| DELETE | /api/users/:id              | Delete user                    | Super Admin |
+
+#### Example: Get User by ID
 ```bash
-curl -X POST http://localhost:5001/internal/users/verify \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "john@example.com",
-    "password": "password123"
-  }'
-```
-
-**Response (200 OK):**
-```json
-{
-  "userId": "uuid-string",
-  "userType": "normal_user",
-  "isActive": true
-}
-```
-
-**Response (401 Unauthorized):**
-```json
-{
-  "error": "Invalid email or password"
-}
-```
-
-**Response (404 Not Found):**
-```json
-{
-  "error": "User not found"
-}
-```
-
-### External APIs (via Gateway, requires JWT) Implemented
-
-| Method | Endpoint                          | Description                    | Auth Required |
-|--------|-----------------------------------|--------------------------------|---------------|
-| GET    | /api/users/me                     | Get current user profile       | JWT           |
-| PUT    | /api/users/me                     | Update current user profile    | JWT           |
-| PUT    | /api/users/me/profile-image        | Update profile image            | JWT           |
-| POST   | /api/users/me/email/request-update| Request email update            | JWT           |
-| POST   | /api/users/me/email/confirm-update | Confirm email update           | JWT           |
-| GET    | /api/users/{id}/profile           | Get user profile by ID          | JWT           |
-| PUT    | /api/users/{id}/profile           | Update own profile             | JWT (self)    |
-| GET    | /api/users                        | List all users                 | Admin only    |
-| PUT    | /api/users/{id}/status            | Ban/Unban user                 | Admin only    |
-
-#### Example: Get Current User (restore login state)
-```bash
-curl http://localhost:8080/api/users/me \
+curl http://localhost:8080/api/users/1 \
   -H "Authorization: Bearer <JWT_TOKEN>"
 ```
 
-#### Example: Update Current User Profile
+#### Example: Update User Profile
 ```bash
-curl -X PUT http://localhost:8080/api/users/me \
+curl -X PUT http://localhost:8080/api/users/1 \
   -H "Authorization: Bearer <JWT_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "firstName": "John",
-    "lastName": "Smith"
-  }'
+  -d '{"firstName": "John", "lastName": "Smith", "email": "john@example.com"}'
 ```
-
-**Response (200 OK):**
-```json
-{
-  "message": "Profile updated successfully",
-  "user": {
-    "userId": "uuid-string",
-    "firstName": "John",
-    "lastName": "Smith",
-    ...
-  }
-}
-```
+Response includes `user` (camelCase) and optionally `emailChanged`.
 
 #### Example: Update Profile Image
 ```bash
-curl -X PUT http://localhost:8080/api/users/me/profile-image \
+curl -X PUT http://localhost:8080/api/users/1/profile-image \
   -H "Authorization: Bearer <JWT_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "profileImageURL": "https://s3.amazonaws.com/bucket/avatar.jpg"
-  }'
-```
-
-**Response (200 OK):**
-```json
-{
-  "message": "Profile image updated successfully",
-  "user": {
-    "userId": "uuid-string",
-    "profileImageURL": "https://s3.amazonaws.com/bucket/avatar.jpg",
-    ...
-  }
-}
-```
-
-#### Example: Request Email Update
-```bash
-curl -X POST http://localhost:8080/api/users/me/email/request-update \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "newEmail": "newemail@example.com"
-  }'
-```
-
-**Response (200 OK):**
-```json
-{
-  "message": "Verification code sent to new email address"
-}
-```
-
-**Response (409 Conflict):**
-```json
-{
-  "message": "Validation failed",
-  "details": {
-    "newEmail": "Email already in use"
-  }
-}
-```
-
-#### Example: Confirm Email Update
-```bash
-curl -X POST http://localhost:8080/api/users/me/email/confirm-update \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "newEmail": "newemail@example.com",
-    "verificationCode": "123456"
-  }'
-```
-
-**Response (200 OK):**
-```json
-{
-  "message": "Email updated successfully. Please verify your new email address.",
-  "user": {
-    "userId": "uuid-string",
-    "email": "newemail@example.com",
-    "userType": "unverified",
-    ...
-  }
-}
-```
-
-**Response (400 Bad Request):**
-```json
-{
-  "message": "Verification failed",
-  "details": {
-    "verificationCode": "Invalid verification code"
-  }
-}
-```
-
-> **Note**: After email update, `userType` is reset to `unverified` and user must verify the new email address.
-
-#### Example: Update Profile (Legacy endpoint)
-```bash
-curl -X PUT http://localhost:8080/api/users/{user_id}/profile \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "firstName": "John",
-    "lastName": "Smith",
-    "profileImageURL": "https://example.com/avatar.jpg"
-  }'
+  -d '{"profileImageUrl": "https://bucket.s3.../profile/1/uuid.jpg"}'
 ```
 
 #### Example: List All Users (Admin)
@@ -374,21 +231,18 @@ curl "http://localhost:8080/api/users?page=1&per_page=20" \
   -H "Authorization: Bearer <ADMIN_JWT_TOKEN>"
 ```
 
-#### Example: Ban User (Admin)
+#### Example: Ban / Unban User (Admin)
 ```bash
-curl -X PUT http://localhost:8080/api/users/{user_id}/status \
-  -H "Authorization: Bearer <ADMIN_JWT_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"isActive": false}'
+curl -X PUT http://localhost:8080/api/users/2/ban \
+  -H "Authorization: Bearer <ADMIN_JWT_TOKEN>"
+
+curl -X PUT http://localhost:8080/api/users/2/unban \
+  -H "Authorization: Bearer <ADMIN_JWT_TOKEN>"
 ```
 
 ## JWT Token Structure
 
-External APIs expect JWT tokens with the following claims:
-- `sub` (identity): User ID
-- `userType`: User role (`unverified`, `normal_user`, `admin`, `superadmin`)
-
-**Note**: JWT tokens are issued by Auth Service. All external requests must include:
+The Gateway validates JWT tokens (issued by Auth Service) and forwards `X-User-Id`, `X-User-Type`, `X-User-Email` to this service. All external requests via Gateway must include:
 ```
 Authorization: Bearer <token>
 ```
